@@ -1,52 +1,51 @@
 // models/Notification.ts
 // Centralized notification model used across every module of the application.
 // Additive only — does not alter any existing model or collection.
-import mongoose, { Schema, type Document } from "mongoose"
+import mongoose, { Schema, type Document } from "mongoose";
 
-export type NotificationPriority = "low" | "medium" | "high" | "critical"
+export type NotificationPriority = "low" | "medium" | "high" | "critical";
 
 export type NotificationType =
   | "user_created"
-  | "task_assigned"
   | "task_created"
+  | "task_assigned"
   | "task_status_changed"
   | "task_unposted"
   | "complaint_created"
   | "complaint_assigned"
   | "complaint_resolved"
-  | "complaint_status_changed"
+  | "complaint_rejected" // <--- Ensure this is added here
   | "registration_submitted"
   | "registration_approved"
   | "registration_rejected"
   | "profile_updated"
   | "document_uploaded"
-  | "project_created"
   | "company_created"
+  | "project_created"
   | "announcement"
   | "comment"
-  | "reminder"
-  | "generic"
+  | "reminder";
 
 export interface INotification extends Document {
-  title: string
-  message: string
-  module: string
-  type: NotificationType
-  priority: NotificationPriority
-  referenceId?: string
-  actionUrl?: string
+  title: string;
+  message: string;
+  module: string;
+  type: NotificationType;
+  priority: NotificationPriority;
+  referenceId?: string;
+  actionUrl?: string;
   sender?: {
-    id?: string
-    name?: string
-    username?: string
-  }
-  recipientId: string
-  recipientRole?: string
-  isRead: boolean
-  readAt?: Date | null
-  metadata?: Record<string, unknown>
-  createdAt: Date
-  updatedAt: Date
+    id?: string;
+    name?: string;
+    username?: string;
+  };
+  recipientId: string;
+  recipientRole?: string;
+  isRead: boolean;
+  readAt?: Date | null;
+  metadata?: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const NotificationSchema: Schema = new Schema(
@@ -79,14 +78,15 @@ const NotificationSchema: Schema = new Schema(
     metadata: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true },
-)
+);
 
 // Common compound indexes for fast, paginated, filterable queries.
-NotificationSchema.index({ recipientId: 1, isRead: 1, createdAt: -1 })
-NotificationSchema.index({ recipientId: 1, module: 1, createdAt: -1 })
-NotificationSchema.index({ recipientId: 1, priority: 1, createdAt: -1 })
+NotificationSchema.index({ recipientId: 1, isRead: 1, createdAt: -1 });
+NotificationSchema.index({ recipientId: 1, module: 1, createdAt: -1 });
+NotificationSchema.index({ recipientId: 1, priority: 1, createdAt: -1 });
 
 const Notification =
-  mongoose.models.Notification || mongoose.model<INotification>("Notification", NotificationSchema)
+  mongoose.models.Notification ||
+  mongoose.model<INotification>("Notification", NotificationSchema);
 
-export default Notification
+export default Notification;
