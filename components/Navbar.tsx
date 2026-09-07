@@ -199,7 +199,7 @@ export function Navbar() {
               </motion.div>
 
               {/* Complaint Status — existing tracking page, unchanged. */}
-              <motion.div
+              {/* <motion.div
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.22 }}
@@ -211,7 +211,7 @@ export function Navbar() {
                 >
                   Complaint Status
                 </Button>
-              </motion.div>
+              </motion.div> */}
 
               {/* Complaint History — email verification gate, then shows
                   that email's own complaint history only. */}
