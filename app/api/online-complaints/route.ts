@@ -21,28 +21,20 @@ export async function POST(request: Request) {
     const formData = await request.formData();
 
     // ============================
-    // Verify JWT
+    // Verify JWT (optional)
     // ============================
     const authHeader = formData.get("authorization") as string;
-    if (!authHeader) {
-      return NextResponse.json(
-        { error: "No authorization token" },
-        { status: 401 }
-      );
+    let userId: string | undefined;
+    if (authHeader) {
+      try {
+        const decoded = verifyToken(authHeader);
+        userId = decoded.userId;
+      } catch {
+        userId = undefined;
+      }
     }
 
-    let userId: string;
-    try {
-      const decoded = verifyToken(authHeader);
-      userId = decoded.userId;
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid or expired authorization token" },
-        { status: 401 }
-      );
-    }
-
-    // Required fields
+    // Required fields (email is now optional)
     const rawCompany = formData.get("company") as string;
     const softwareType = formData.get("softwareType") as string;
     const contactPerson = formData.get("contactPerson") as string;
@@ -53,19 +45,27 @@ export async function POST(request: Request) {
 
     const attachmentFiles = formData.getAll("attachments") as File[];
 
-    if (!rawCompany || !softwareType || !contactPerson || !contactPhone || !complaintRemarks || !email) {
+    if (
+      !rawCompany ||
+      !softwareType ||
+      !contactPerson ||
+      !contactPhone ||
+      !complaintRemarks
+    ) {
       return NextResponse.json(
         {
-          error: "All fields are required",
+          error: "All required fields must be filled",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!(await isValidActiveSoftwareType(softwareType))) {
       return NextResponse.json(
-        { error: `Invalid software type: "${softwareType}" is not an active software type.` },
-        { status: 400 }
+        {
+          error: `Invalid software type: "${softwareType}" is not an active software type.`,
+        },
+        { status: 400 },
       );
     }
 
@@ -78,18 +78,13 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json(
         { error: "Invalid company format" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     // ============================
     // Generate complaint number
     // ============================
-    // A timestamp alone can collide if two complaints are submitted in the
-    // same millisecond (concurrent requests). Append a short random suffix
-    // so the value stays effectively unique on top of the schema-level
-    // `unique: true` constraint, without changing the existing "COMP-..."
-    // format that the UI/emails already display.
     const complaintNumber = `COMP-${Date.now()}${Math.floor(100 + Math.random() * 900)}`;
 
     // ============================
@@ -105,15 +100,18 @@ export async function POST(request: Request) {
 
         if (!validateFileType(file)) {
           return NextResponse.json(
-            { error: "Invalid file type. Only PDF, WORD, EXCEL, IMAGES allowed." },
-            { status: 400 }
+            {
+              error:
+                "Invalid file type. Only PDF, WORD, EXCEL, IMAGES allowed.",
+            },
+            { status: 400 },
           );
         }
 
         if (!validateFileSize(file)) {
           return NextResponse.json(
             { error: "File size exceeds 10MB" },
-            { status: 400 }
+            { status: 400 },
           );
         }
 
@@ -165,27 +163,22 @@ export async function POST(request: Request) {
       contactPerson,
       contactPhone,
       complaintRemarks,
-
-      // FIX — use correct field name
       attachments: savedAttachments,
-
       status: "registered",
       submittedByUserId: userId,
-      submitterEmail: (email || "").toLowerCase().trim(),
+      submitterEmail: email ? email.toLowerCase().trim() : "",
     };
 
-    // Save with a small retry-on-duplicate safety net: in the extremely
-    // rare case the generated complaintNumber still collides with an
-    // existing one (unique index violation, error code 11000), generate a
-    // fresh number and retry rather than failing the whole submission.
     let savedComplaint;
     {
       let attempt = 0;
       let currentNumber = complaintNumber;
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         try {
-          const complaint = new OnlineComplaint({ ...complaintData, complaintNumber: currentNumber });
+          const complaint = new OnlineComplaint({
+            ...complaintData,
+            complaintNumber: currentNumber,
+          });
           savedComplaint = await complaint.save();
           break;
         } catch (saveErr: any) {
@@ -202,32 +195,26 @@ export async function POST(request: Request) {
     pushComplaintHistory(String(savedComplaint._id), {
       action: "created",
       status: "registered",
-      by: contactPerson || email,
+      by: contactPerson || email || "Guest",
       byRole: "customer",
       remarks: complaintRemarks,
     });
 
     // ============================
-    // Email Notification
+    // Email Notification (Conditional)
     // ============================
-    if (email) {
+    if (email && email.trim() !== "") {
       try {
-        // Use the number actually persisted on the saved document (in the
-        // rare retry-on-duplicate case above it can differ from the
-        // originally generated one) so the emailed tracking code always
-        // matches what's stored in the database.
-        await sendComplaintEmail(email, savedComplaint.complaintNumber, firstName || contactPerson);
+        await sendComplaintEmail(
+          email.trim(),
+          savedComplaint.complaintNumber,
+          firstName || contactPerson,
+        );
       } catch (err) {
         console.error("Complaint confirmation email failed to send:", err);
       }
     }
 
-    // Notification: alert staff who can triage/assign complaints.
-    // Awaited (not fire-and-forget) so the notification is guaranteed to be
-    // written before the response is returned - serverless functions can be
-    // frozen/terminated right after responding, which would otherwise risk
-    // silently dropping the notification. notify() already swallows its own
-    // errors internally, so this can never fail the complaint submission.
     await notifyComplaintCreated({
       complaintId: String(savedComplaint._id),
       complaintNumber: savedComplaint.complaintNumber,
@@ -246,7 +233,7 @@ export async function POST(request: Request) {
     console.error("POST ERROR:", error);
     return NextResponse.json(
       { error: "Internal Server Error", details: error.message },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -273,18 +260,15 @@ export async function GET(req: Request) {
       _id: c._id.toString(),
       createdAt: c.createdAt?.toISOString(),
       updatedAt: c.updatedAt?.toISOString(),
-
-      // Correct attachment fields
       attachments: c.attachments || [],
       assignmentAttachments: c.assignmentAttachments || [],
-      resolutionAttachments: c.resolutionAttachments || [], // Add this line
-      developer_attachment: c.developer_attachment || [], // Add this line for compatibility
-
+      resolutionAttachments: c.resolutionAttachments || [],
+      developer_attachment: c.developer_attachment || [],
       assignedTo: c.assignedTo || null,
       assignedDate: c.assignedDate ? c.assignedDate.toISOString() : null,
-      resolvedDate: c.resolvedDate ? c.resolvedDate.toISOString() : null, // Add this line
-      resolutionRemarks: c.resolutionRemarks || "", // Add this line
-      developerStatus: c.developerStatus || "not-started" // Add this line
+      resolvedDate: c.resolvedDate ? c.resolvedDate.toISOString() : null,
+      resolutionRemarks: c.resolutionRemarks || "",
+      developerStatus: c.developerStatus || "not-started",
     }));
 
     return NextResponse.json(formatted);
@@ -292,7 +276,7 @@ export async function GET(req: Request) {
     console.error("GET ERROR:", error);
     return NextResponse.json(
       { error: "Failed to fetch complaints", details: error.message },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import { useState, useEffect } from "react"
@@ -8,8 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Menu, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
-import { useCustomerAuth } from "@/contexts/CustomerAuthContext"
 import RegisterPage from "./Register/RegisterPage"
+import { ComplaintHistoryModal } from "./ComplaintHistoryModal"
 import image from "./image.png"
 import Image from "next/image"
 
@@ -18,13 +17,10 @@ export function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [showRegisterPage, setShowRegisterPage] = useState(false)
+  const [showComplaintHistory, setShowComplaintHistory] = useState(false)
 
   const router = useRouter()
   const { user: sessionUser, logout } = useAuth()
-  // Approved, email-verified customers (see /verify-email) — a session
-  // parallel to the admin session above. Kept additive on purpose so the
-  // existing admin/staff auth path is never touched.
-  const { customerUser } = useCustomerAuth()
 
   useEffect(() => {
     const handleScroll = () => {
@@ -74,15 +70,10 @@ export function Navbar() {
     setIsMobileMenuOpen(false)
   }
 
-  // A verified, approved customer goes straight to the Complaint module.
-  // Everyone else is sent through the email verification gate, which
-  // checks their registration status before granting access.
+  // Email verification gate removed: everyone goes straight to the
+  // complaint registration form now, regardless of account status.
   const handleRegisterComplaint = () => {
-    if (customerUser) {
-      router.push("/complaint-module")
-    } else {
-      router.push("/verify-email?next=/complaint-module")
-    }
+    router.push("/online_complaint")
     setIsMobileMenuOpen(false)
   }
 
@@ -93,6 +84,20 @@ export function Navbar() {
 
   const handleGoToDashboard = () => {
     router.push("/dashboard")
+    setIsMobileMenuOpen(false)
+  }
+
+  // Complaint Status — existing dedicated page, unchanged. Just gives
+  // the customer a direct route into it from the Navbar.
+  const handleComplaintStatus = () => {
+    router.push("/complaint_status")
+    setIsMobileMenuOpen(false)
+  }
+
+  // Complaint History — opens the existing email-verification-gated
+  // history modal (registered & verified emails only).
+  const handleComplaintHistory = () => {
+    setShowComplaintHistory(true)
     setIsMobileMenuOpen(false)
   }
 
@@ -172,7 +177,7 @@ export function Navbar() {
                   onClick={userRegister}
                 >
                 
-                  User Register
+                  Company Register
                 </Button>
               </motion.div>
 
@@ -190,6 +195,37 @@ export function Navbar() {
                 >
                   
                   Complaint Register
+                </Button>
+              </motion.div>
+
+              {/* Complaint Status — existing tracking page, unchanged. */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.22 }}
+              >
+                <Button
+                  variant="outline"
+                  className="font-medium gap-1.5 px-3 h-10"
+                  onClick={handleComplaintStatus}
+                >
+                  Complaint Status
+                </Button>
+              </motion.div>
+
+              {/* Complaint History — email verification gate, then shows
+                  that email's own complaint history only. */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.24 }}
+              >
+                <Button
+                  variant="outline"
+                  className="font-medium gap-1.5 px-3 h-10"
+                  onClick={handleComplaintHistory}
+                >
+                  Complaint History
                 </Button>
               </motion.div>
 
@@ -300,6 +336,22 @@ export function Navbar() {
                     Complaint Register
                   </Button>
 
+                  <Button
+                    variant="outline"
+                    className="w-full justify-center gap-1.5 font-medium h-10"
+                    onClick={handleComplaintStatus}
+                  >
+                    Complaint Status
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="w-full justify-center gap-1.5 font-medium h-10"
+                    onClick={handleComplaintHistory}
+                  >
+                    Complaint History
+                  </Button>
+
                   {sessionUser && (
                     <Button
                       variant="outline"
@@ -353,6 +405,12 @@ export function Navbar() {
           </motion.div>
         </motion.div>
       )}
+
+      {/* Complaint History Modal */}
+      <ComplaintHistoryModal
+        isOpen={showComplaintHistory}
+        onClose={() => setShowComplaintHistory(false)}
+      />
     </>
   )
 }
