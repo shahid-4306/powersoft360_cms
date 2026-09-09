@@ -23,6 +23,11 @@ export async function POST(request: Request) {
     // ============================
     // Verify JWT (optional)
     // ============================
+    // The email-verification gate in front of this form was removed, so a
+    // customer session/token is no longer required to submit a complaint.
+    // If a request still carries one (a verified account submitting the
+    // form), it's honored and the complaint gets linked to that account;
+    // otherwise the complaint is simply saved without a submittedByUserId.
     const authHeader = formData.get("authorization") as string;
     let userId: string | undefined;
     if (authHeader) {
@@ -30,11 +35,13 @@ export async function POST(request: Request) {
         const decoded = verifyToken(authHeader);
         userId = decoded.userId;
       } catch {
+        // Invalid/expired token on an otherwise-open submission: ignore it
+        // rather than blocking the complaint.
         userId = undefined;
       }
     }
 
-    // Required fields (email is now optional)
+    // Required fields
     const rawCompany = formData.get("company") as string;
     const softwareType = formData.get("softwareType") as string;
     const contactPerson = formData.get("contactPerson") as string;
@@ -50,11 +57,30 @@ export async function POST(request: Request) {
       !softwareType ||
       !contactPerson ||
       !contactPhone ||
-      !complaintRemarks
+      !complaintRemarks ||
+      !email
     ) {
       return NextResponse.json(
         {
-          error: "All required fields must be filled",
+          error: "All fields are required",
+        },
+        { status: 400 },
+      );
+    }
+
+    // ----------------------------------------------------------------
+    // Phone number validation — must start with "03" and be exactly
+    // 11 digits (e.g. 03001234567). Enforced server-side as the
+    // authoritative check, in addition to the client-side check in
+    // the registration form, so the API can never accept a malformed
+    // number even if it's hit directly.
+    // ----------------------------------------------------------------
+    const normalizedContactPhone = (contactPhone || "").trim();
+    if (!/^03\d{9}$/.test(normalizedContactPhone)) {
+      return NextResponse.json(
+        {
+          error:
+            "Invalid contact phone number. It must start with '03' and contain exactly 11 digits.",
         },
         { status: 400 },
       );
@@ -85,6 +111,11 @@ export async function POST(request: Request) {
     // ============================
     // Generate complaint number
     // ============================
+    // A timestamp alone can collide if two complaints are submitted in the
+    // same millisecond (concurrent requests). Append a short random suffix
+    // so the value stays effectively unique on top of the schema-level
+    // `unique: true` constraint, without changing the existing "COMP-..."
+    // format that the UI/emails already display.
     const complaintNumber = `COMP-${Date.now()}${Math.floor(100 + Math.random() * 900)}`;
 
     // ============================
@@ -161,18 +192,26 @@ export async function POST(request: Request) {
 
       softwareType,
       contactPerson,
-      contactPhone,
+      contactPhone: normalizedContactPhone,
       complaintRemarks,
+
+      // FIX — use correct field name
       attachments: savedAttachments,
+
       status: "registered",
       submittedByUserId: userId,
-      submitterEmail: email ? email.toLowerCase().trim() : "",
+      submitterEmail: (email || "").toLowerCase().trim(),
     };
 
+    // Save with a small retry-on-duplicate safety net: in the extremely
+    // rare case the generated complaintNumber still collides with an
+    // existing one (unique index violation, error code 11000), generate a
+    // fresh number and retry rather than failing the whole submission.
     let savedComplaint;
     {
       let attempt = 0;
       let currentNumber = complaintNumber;
+      // eslint-disable-next-line no-constant-condition
       while (true) {
         try {
           const complaint = new OnlineComplaint({
@@ -195,18 +234,22 @@ export async function POST(request: Request) {
     pushComplaintHistory(String(savedComplaint._id), {
       action: "created",
       status: "registered",
-      by: contactPerson || email || "Guest",
+      by: contactPerson || email,
       byRole: "customer",
       remarks: complaintRemarks,
     });
 
     // ============================
-    // Email Notification (Conditional)
+    // Email Notification
     // ============================
-    if (email && email.trim() !== "") {
+    if (email) {
       try {
+        // Use the number actually persisted on the saved document (in the
+        // rare retry-on-duplicate case above it can differ from the
+        // originally generated one) so the emailed tracking code always
+        // matches what's stored in the database.
         await sendComplaintEmail(
-          email.trim(),
+          email,
           savedComplaint.complaintNumber,
           firstName || contactPerson,
         );
@@ -215,6 +258,12 @@ export async function POST(request: Request) {
       }
     }
 
+    // Notification: alert staff who can triage/assign complaints.
+    // Awaited (not fire-and-forget) so the notification is guaranteed to be
+    // written before the response is returned - serverless functions can be
+    // frozen/terminated right after responding, which would otherwise risk
+    // silently dropping the notification. notify() already swallows its own
+    // errors internally, so this can never fail the complaint submission.
     await notifyComplaintCreated({
       complaintId: String(savedComplaint._id),
       complaintNumber: savedComplaint.complaintNumber,
@@ -260,15 +309,18 @@ export async function GET(req: Request) {
       _id: c._id.toString(),
       createdAt: c.createdAt?.toISOString(),
       updatedAt: c.updatedAt?.toISOString(),
+
+      // Correct attachment fields
       attachments: c.attachments || [],
       assignmentAttachments: c.assignmentAttachments || [],
-      resolutionAttachments: c.resolutionAttachments || [],
-      developer_attachment: c.developer_attachment || [],
+      resolutionAttachments: c.resolutionAttachments || [], // Add this line
+      developer_attachment: c.developer_attachment || [], // Add this line for compatibility
+
       assignedTo: c.assignedTo || null,
       assignedDate: c.assignedDate ? c.assignedDate.toISOString() : null,
-      resolvedDate: c.resolvedDate ? c.resolvedDate.toISOString() : null,
-      resolutionRemarks: c.resolutionRemarks || "",
-      developerStatus: c.developerStatus || "not-started",
+      resolvedDate: c.resolvedDate ? c.resolvedDate.toISOString() : null, // Add this line
+      resolutionRemarks: c.resolutionRemarks || "", // Add this line
+      developerStatus: c.developerStatus || "not-started", // Add this line
     }));
 
     return NextResponse.json(formatted);

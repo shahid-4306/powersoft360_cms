@@ -1,30 +1,29 @@
-// models/Notification.ts
-// Centralized notification model used across every module of the application.
-// Additive only — does not alter any existing model or collection.
 import mongoose, { Schema, type Document } from "mongoose";
 
 export type NotificationPriority = "low" | "medium" | "high" | "critical";
 
 export type NotificationType =
   | "user_created"
-  | "task_created"
   | "task_assigned"
+  | "task_created"
   | "task_status_changed"
   | "task_unposted"
   | "complaint_created"
   | "complaint_assigned"
   | "complaint_resolved"
-  | "complaint_rejected" // <--- Ensure this is added here
+  | "complaint_rejected"
+  | "complaint_status_changed"
   | "registration_submitted"
   | "registration_approved"
   | "registration_rejected"
   | "profile_updated"
   | "document_uploaded"
-  | "company_created"
   | "project_created"
+  | "company_created"
   | "announcement"
   | "comment"
-  | "reminder";
+  | "reminder"
+  | "generic";
 
 export interface INotification extends Document {
   title: string;
