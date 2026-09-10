@@ -57,6 +57,7 @@ interface ComplaintData {
     address: string
   }
   softwareType: string
+  complaintType?: string
   contactPerson: string
   contactPhone: string
   complaintRemarks: string
@@ -67,6 +68,7 @@ interface ComplaintData {
   assignedTo?: { name: string; role?: { name?: string } } | null
   assignedDate?: string | null
   assignmentRemarks?: string
+  expectedCompletionAt?: string | null
 
   // Rejection fields — set when an Administrator rejects an
   // incomplete/invalid complaint from the Task & Complaint Assignment
@@ -140,6 +142,36 @@ const statusConfig = {
 function formatDateTime(value?: string | null) {
   if (!value) return '—'
   return new Date(value).toLocaleString()
+}
+
+// Computes a human-readable "remaining / overdue" label for a complaint's
+// Expected Completion Time, given the complaint is not yet resolved/closed.
+// Purely a display helper — the source of truth remains the
+// expectedCompletionAt value saved by the Administrator on the server.
+function formatRemainingTime(expectedCompletionAt?: string | null): { label: string; overdue: boolean } | null {
+  if (!expectedCompletionAt) return null
+  const deadline = new Date(expectedCompletionAt).getTime()
+  if (isNaN(deadline)) return null
+
+  const now = Date.now()
+  const diffMs = deadline - now
+  const overdue = diffMs < 0
+  const absMs = Math.abs(diffMs)
+
+  const minutes = Math.floor(absMs / (60 * 1000)) % 60
+  const hours = Math.floor(absMs / (60 * 60 * 1000)) % 24
+  const days = Math.floor(absMs / (24 * 60 * 60 * 1000))
+
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days}d`)
+  if (hours > 0 || days > 0) parts.push(`${hours}h`)
+  parts.push(`${minutes}m`)
+
+  const duration = parts.join(' ')
+  return {
+    label: overdue ? `Overdue by ${duration}` : `${duration} remaining`,
+    overdue,
+  }
 }
 
 export default function ComplaintStatusPage() {
@@ -528,6 +560,10 @@ export default function ComplaintStatusPage() {
                         <p className="font-medium text-foreground">{complaint.softwareType || 'N/A'}</p>
                       </div>
                       <div>
+                        <p className="text-muted-foreground">Complaint Type</p>
+                        <p className="font-medium text-foreground">{complaint.complaintType || 'N/A'}</p>
+                      </div>
+                      <div>
                         <p className="text-muted-foreground">Contact Person</p>
                         <p className="font-medium text-foreground">{complaint.contactPerson || 'N/A'}</p>
                       </div>
@@ -571,6 +607,22 @@ export default function ComplaintStatusPage() {
                               <p className="text-xs text-muted-foreground">
                                 Assigned on {formatDateTime(complaint.assignedDate)}
                               </p>
+                            )}
+                            {complaint.expectedCompletionAt && (
+                              <div className="mt-1">
+                                <p className="text-xs text-muted-foreground">
+                                  Expected Completion Time: {formatDateTime(complaint.expectedCompletionAt)}
+                                </p>
+                                {complaint.status !== 'resolved' && complaint.status !== 'closed' && (() => {
+                                  const remaining = formatRemainingTime(complaint.expectedCompletionAt)
+                                  if (!remaining) return null
+                                  return (
+                                    <p className={`text-xs font-medium mt-0.5 ${remaining.overdue ? 'text-red-600' : 'text-emerald-600'}`}>
+                                      {remaining.label}
+                                    </p>
+                                  )
+                                })()}
+                              </div>
                             )}
                           </div>
                         )}

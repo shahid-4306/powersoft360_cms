@@ -19,6 +19,7 @@ import { SuccessMessage } from '@/components/online_complaint/SuccessMessage'
 interface FormData {
   selectedCompany: Company | null
   softwareType: string
+  complaintType: string
   contactPerson: string
   contactPhone: string
   contactEmail: string
@@ -29,6 +30,7 @@ interface FormData {
 const EMPTY_FORM: FormData = {
   selectedCompany: null,
   softwareType: '',
+  complaintType: '',
   contactPerson: '',
   contactPhone: '',
   contactEmail: '',
@@ -75,6 +77,13 @@ export default function OnlineComplaintForm() {
 
   const [globalSoftwareTypes, setGlobalSoftwareTypes] = useState<string[]>([])
 
+  // Complaint Type — managed by the Administrator from Dashboard →
+  // Complaint Types. Fetched once on mount, same pattern as software
+  // types above, so any type the Administrator creates is immediately
+  // available here without a code change.
+  const [complaintTypeOptions, setComplaintTypeOptions] = useState<string[]>([])
+  const [complaintTypeLoading, setComplaintTypeLoading] = useState(true)
+
   // Manual company entry state
   const [manualCompanyText, setManualCompanyText] = useState('')
   const [showManualInput, setShowManualInput] = useState(false)
@@ -93,6 +102,29 @@ export default function OnlineComplaintForm() {
       })
       .catch(() => {
         if (isMounted) setGlobalSoftwareTypes([])
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+    setComplaintTypeLoading(true)
+    fetch('/api/complaint-types')
+      .then(res => res.json())
+      .then(data => {
+        if (!isMounted) return
+        const names = Array.isArray(data.complaintTypes)
+          ? data.complaintTypes.map((t: { name: string }) => t.name)
+          : []
+        setComplaintTypeOptions(names)
+      })
+      .catch(() => {
+        if (isMounted) setComplaintTypeOptions([])
+      })
+      .finally(() => {
+        if (isMounted) setComplaintTypeLoading(false)
       })
     return () => {
       isMounted = false
@@ -292,6 +324,11 @@ export default function OnlineComplaintForm() {
       return
     }
 
+    if (!formData.complaintType) {
+      alert('Please select complaint type')
+      return
+    }
+
     if (!formData.contactPerson || !formData.contactPhone || !formData.contactEmail || !formData.complaintRemarks) {
       alert('Please fill all required fields')
       return
@@ -308,6 +345,7 @@ export default function OnlineComplaintForm() {
       const submitData = new FormData()
       submitData.append('company', JSON.stringify(company))
       submitData.append('softwareType', formData.softwareType)
+      submitData.append('complaintType', formData.complaintType)
       submitData.append('contactPerson', formData.contactPerson)
       submitData.append('contactPhone', formData.contactPhone)
       submitData.append('complaintRemarks', formData.complaintRemarks)
@@ -491,6 +529,26 @@ export default function OnlineComplaintForm() {
                     </select>
                   </div>
                 )}
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground/80">
+                    Complaint Type *
+                  </label>
+                  <select
+                    value={formData.complaintType}
+                    onChange={(e) => setFormData(prev => ({ ...prev, complaintType: e.target.value }))}
+                    className="w-full p-3 border border-border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-primary bg-white"
+                    required
+                    disabled={complaintTypeLoading}
+                  >
+                    <option value="">
+                      {complaintTypeLoading ? "Loading complaint types..." : "Select Complaint Type"}
+                    </option>
+                    {complaintTypeOptions.map((type) => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
+                </div>
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground/80">

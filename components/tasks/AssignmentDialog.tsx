@@ -1,3 +1,6 @@
+
+
+
 "use client"
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -21,6 +24,7 @@ interface AssignmentDialogProps {
   assignmentData: {
     userId: string
     assignedDate: string
+    expectedCompletionAt: string
   }
   remarks: string
   files: File[]
@@ -54,6 +58,12 @@ export function AssignmentDialog({
   const [localItem, setLocalItem] = useState<any>(null)
   const { isDownloading: isComplaintDownloading, downloadAllAttachments: downloadComplaintAttachments } = useComplaintDownload()
 
+  // Validation state for expected completion
+  const [expectedError, setExpectedError] = useState<string>("")
+  const [touched, setTouched] = useState(false)
+  const [assignedDateError, setAssignedDateError] = useState<string>("")
+  const [assignedDateTouched, setAssignedDateTouched] = useState(false)
+
   // Update local item when prop changes
   useEffect(() => {
     if (item) {
@@ -66,10 +76,21 @@ export function AssignmentDialog({
     if (!isOpen) {
       const timer = setTimeout(() => {
         setLocalItem(null)
+        setExpectedError("")
+        setTouched(false)
+        setAssignedDateError("")
+        setAssignedDateTouched(false)
       }, 300)
       return () => clearTimeout(timer)
     }
   }, [isOpen])
+
+  // Re-validate expected completion when assignedDate changes
+  useEffect(() => {
+    if (touched && assignmentData.expectedCompletionAt) {
+      setExpectedError(validateExpectedCompletion(assignmentData.expectedCompletionAt))
+    }
+  }, [assignmentData.assignedDate])
 
   // Helper function to get company data consistently
   const getCompanyData = () => {
@@ -105,19 +126,79 @@ export function AssignmentDialog({
     }
   };
 
-  // NEW: Normalize attachments for both tasks & complaints (covers different field names)
-  // NEW: Normalize attachments for both tasks & complaints (covers different field names)
-const getAttachments = () => {
-  if (!localItem) return []
-  
-  // For complaints: check both possible field names
-  if (isComplaint) {
-    return localItem.attachments || localItem.complaintAttachments || []
+  // Normalize attachments for both tasks & complaints (covers different field names)
+  const getAttachments = () => {
+    if (!localItem) return []
+    
+    // For complaints: check both possible field names
+    if (isComplaint) {
+      return localItem.attachments || localItem.complaintAttachments || []
+    }
+    
+    // For tasks: check various field names
+    return localItem.TasksAttachment || localItem.attachments || localItem.Attachments || []
   }
-  
-  // For tasks: check various field names
-  return localItem.TasksAttachment || localItem.attachments || localItem.Attachments || []
-}
+
+  // ============================================================
+  // VALIDATION FUNCTIONS
+  // ============================================================
+
+  // Validate assignment date
+  const validateAssignedDate = (value: string): string => {
+    if (!value) {
+      return "Assignment date & time is required"
+    }
+
+    const selectedDate = new Date(value)
+    if (isNaN(selectedDate.getTime())) {
+      return "Please enter a valid date & time"
+    }
+
+    return ""
+  }
+
+  // Validate expected completion datetime
+  const validateExpectedCompletion = (value: string): string => {
+    if (!value) {
+      return "Expected completion time is required"
+    }
+
+    const selectedDate = new Date(value)
+    if (isNaN(selectedDate.getTime())) {
+      return "Please enter a valid date & time"
+    }
+
+    const now = new Date()
+    
+    // Check if date is in the past
+    if (selectedDate < now) {
+      return "Expected completion time cannot be in the past"
+    }
+
+    // Check if expected completion is before/equal assigned date
+    if (assignmentData.assignedDate) {
+      const assignedDate = new Date(assignmentData.assignedDate)
+      if (!isNaN(assignedDate.getTime()) && selectedDate <= assignedDate) {
+        return "Expected completion must be after the assignment date"
+      }
+    }
+
+    return ""
+  }
+
+  // Check if form is valid overall
+  const isFormValid = (): boolean => {
+    if (!assignmentData.userId) return false
+    if (!assignmentData.assignedDate) return false
+    if (!assignmentData.expectedCompletionAt) return false
+    if (validateAssignedDate(assignmentData.assignedDate)) return false
+    if (validateExpectedCompletion(assignmentData.expectedCompletionAt)) return false
+    return true
+  }
+
+  // ============================================================
+  // BADGE HELPERS
+  // ============================================================
 
   const getPriorityBadge = (priority?: string) => {
     const prio = priority || "Normal";
@@ -257,6 +338,16 @@ const getAttachments = () => {
                     <td className="p-2 sm:p-3 break-words">{localItem.softwareType || 'N/A'}</td>
                   </tr>
                 )}
+
+                {/* Complaint Type (for complaints) */}
+                {isComplaint && (
+                  <tr>
+                    <td className="p-2 sm:p-3 font-medium w-[100px] sm:w-[120px] shrink-0 flex items-center gap-1 text-xs sm:text-sm">
+                      <ClipboardList className="h-3 w-3 text-muted-foreground" /> Complaint Type
+                    </td>
+                    <td className="p-2 sm:p-3 break-words">{localItem.complaintType || 'N/A'}</td>
+                  </tr>
+                )}
                 
                 {/* Description/Remarks */}
                 <tr>
@@ -303,40 +394,40 @@ const getAttachments = () => {
                     <td className="p-2 sm:p-3 break-words">
                       <div className="space-y-2">
                         <Button 
-  type="button" 
-  variant="outline" 
-  size="sm" 
-  className="text-xs"
-  onClick={() => {
-    if (isComplaint) {
-      console.log('Downloading complaint attachments:', {
-        _id: localItem._id,
-        complaintNumber: localItem.complaintNumber,
-        attachmentsCount: attachments.length // Add this to debug
-      });
-      downloadComplaintAttachments(
-        localItem._id,
-        localItem.complaintNumber
-      );
-    } else {
-      console.log('Downloading task attachments:', localItem._id);
-      downloadTaskAttachments(localItem._id);
-    }
-  }}
-  disabled={isComplaint ? isComplaintDownloading : isTaskDownloading}
->
-  {(isComplaint ? isComplaintDownloading : isTaskDownloading) ? (
-    <>
-      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-      Downloading...
-    </>
-  ) : (
-    <>
-      <Download className="h-3 w-3 mr-1" />
-      Download All {attachments.length > 0 ? `(${attachments.length})` : ''}
-    </>
-  )}
-</Button>
+                          type="button" 
+                          variant="outline" 
+                          size="sm" 
+                          className="text-xs"
+                          onClick={() => {
+                            if (isComplaint) {
+                              console.log('Downloading complaint attachments:', {
+                                _id: localItem._id,
+                                complaintNumber: localItem.complaintNumber,
+                                attachmentsCount: attachments.length
+                              });
+                              downloadComplaintAttachments(
+                                localItem._id,
+                                localItem.complaintNumber
+                              );
+                            } else {
+                              console.log('Downloading task attachments:', localItem._id);
+                              downloadTaskAttachments(localItem._id);
+                            }
+                          }}
+                          disabled={isComplaint ? isComplaintDownloading : isTaskDownloading}
+                        >
+                          {(isComplaint ? isComplaintDownloading : isTaskDownloading) ? (
+                            <>
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              Downloading...
+                            </>
+                          ) : (
+                            <>
+                              <Download className="h-3 w-3 mr-1" />
+                              Download All {attachments.length > 0 ? `(${attachments.length})` : ''}
+                            </>
+                          )}
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -391,8 +482,11 @@ const getAttachments = () => {
             </table>
           </div>
 
-          {/* Assignment Form Section */}
+          {/* ============================================================
+              ASSIGNMENT FORM SECTION
+          ============================================================ */}
           <div className="space-y-4">
+            {/* Assign to User */}
             <div className="space-y-2">
               <Label htmlFor="user" className="text-xs sm:text-sm font-medium">Assign to User *</Label>
               <Select
@@ -412,19 +506,86 @@ const getAttachments = () => {
               </Select>
             </div>
 
+            {/* Assignment Date & Time */}
             <div className="space-y-2">
               <Label htmlFor="assignedDate" className="text-xs sm:text-sm font-medium">Assignment Date & Time *</Label>
               <Input
                 id="assignedDate"
                 type="datetime-local"
                 value={assignmentData.assignedDate}
-                onChange={(e) =>
-                  onAssignmentDataChange({ ...assignmentData, assignedDate: e.target.value })
-                }
-                className="w-full text-xs sm:text-sm"
+                onChange={(e) => {
+                  const value = e.target.value
+                  onAssignmentDataChange({ ...assignmentData, assignedDate: value })
+                  if (assignedDateTouched) {
+                    setAssignedDateError(validateAssignedDate(value))
+                  }
+                  // Re-validate expected completion since assignedDate changed
+                  if (touched && assignmentData.expectedCompletionAt) {
+                    setExpectedError(validateExpectedCompletion(assignmentData.expectedCompletionAt))
+                  }
+                }}
+                onBlur={(e) => {
+                  setAssignedDateTouched(true)
+                  setAssignedDateError(validateAssignedDate(e.target.value))
+                }}
+                className={`w-full text-xs sm:text-sm ${
+                  assignedDateError && assignedDateTouched ? "border-red-500 focus-visible:ring-red-500" : ""
+                }`}
               />
+              {assignedDateError && assignedDateTouched && (
+                <p className="text-[11px] sm:text-xs text-red-500 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  {assignedDateError}
+                </p>
+              )}
             </div>
 
+            {/* Expected Completion Time / Response Time */}
+            <div className="space-y-2">
+              <Label htmlFor="expectedCompletionAt" className="text-xs sm:text-sm font-medium">
+                Expected Completion Time / Response Time *
+              </Label>
+              <Input
+                id="expectedCompletionAt"
+                type="datetime-local"
+                value={assignmentData.expectedCompletionAt}
+                min={assignmentData.assignedDate || new Date().toISOString().slice(0, 16)}
+                onChange={(e) => {
+                  const value = e.target.value
+                  onAssignmentDataChange({ ...assignmentData, expectedCompletionAt: value })
+                  if (touched) {
+                    setExpectedError(validateExpectedCompletion(value))
+                  }
+                }}
+                onBlur={(e) => {
+                  setTouched(true)
+                  setExpectedError(validateExpectedCompletion(e.target.value))
+                }}
+                className={`w-full text-xs sm:text-sm ${
+                  expectedError && touched ? "border-red-500 focus-visible:ring-red-500" : ""
+                }`}
+                placeholder="YYYY-MM-DDTHH:mm"
+              />
+              
+              {/* Error message */}
+              {expectedError && touched && (
+                <p className="text-[11px] sm:text-xs text-red-500 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  {expectedError}
+                </p>
+              )}
+              
+              {/* Helper text (only when no error) */}
+              {!expectedError && (
+                <p className="text-[11px] sm:text-xs text-muted-foreground">
+                  {isComplaint
+                    ? "The assigned user and the customer will both see this as the deadline to complete the complaint."
+                    : "The assigned user will see this as the deadline to complete the task."}
+                </p>
+              )}
+            </div>
+
+            {/* Remarks */}
             <div className="space-y-2">
               <Label htmlFor="remarks" className="text-xs sm:text-sm font-medium">
                 {isComplaint ? 'Assignment Remarks' : 'Assign Remarks'}
@@ -439,6 +600,7 @@ const getAttachments = () => {
               />
             </div>
 
+            {/* File Attachments */}
             <div className="space-y-2">
               <Label htmlFor="files" className="text-xs sm:text-sm font-medium">Attach Files (Optional)</Label>
               <div className="border rounded-md p-3 space-y-3">
@@ -494,11 +656,24 @@ const getAttachments = () => {
             </div>
           </div>
 
+          {/* ============================================================
+              ACTION BUTTONS
+          ============================================================ */}
           <div className="flex flex-col sm:flex-row gap-2 pt-4">
             <Button
-              onClick={onAssign}
+              onClick={() => {
+                setTouched(true)
+                setAssignedDateTouched(true)
+                const expError = validateExpectedCompletion(assignmentData.expectedCompletionAt)
+                const assError = validateAssignedDate(assignmentData.assignedDate)
+                setExpectedError(expError)
+                setAssignedDateError(assError)
+                if (!expError && !assError) {
+                  onAssign()
+                }
+              }}
               className="flex-1 bg-green-600 hover:bg-green-700 text-xs sm:text-sm py-2"
-              disabled={isAssigning || !localItem}
+              disabled={isAssigning || !localItem || !isFormValid()}
             >
               {isAssigning ? (
                 <div className="flex items-center gap-2">

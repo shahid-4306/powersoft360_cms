@@ -120,6 +120,15 @@ export default function TaskAssignPage() {
       return
     }
 
+    if (!assignmentData.expectedCompletionAt) {
+      toast({
+        title: "Expected Completion Time Required",
+        description: "Please specify an Expected Completion Time / Response Time before assigning.",
+        variant: "destructive",
+      })
+      return
+    }
+
     const isComplaint = selectedTask.isComplaint || false
     
     setIsAssigning(true)

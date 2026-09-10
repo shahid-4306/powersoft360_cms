@@ -41,10 +41,30 @@ export async function PUT(req: Request) {
     const name = (formData.get("name") as string) || "";
     const roleName = (formData.get("roleName") as string) || "";
     const assignedDateRaw = (formData.get("assignedDate") as string) || "";
+    const expectedCompletionAtRaw =
+      (formData.get("expectedCompletionAt") as string) || "";
     const remarks = (formData.get("remarks") as string) || "";
 
     if (!taskId || !userId) {
-      return NextResponse.json({ message: "taskId and userId are required" }, { status: 400 });
+      return NextResponse.json(
+        { message: "taskId and userId are required" },
+        { status: 400 },
+      );
+    }
+
+    // Expected Completion Time is required from the shared assignment
+    // dialog (see components/tasks/AssignmentDialog.tsx) for both Tasks
+    // and Complaints, so an assigned user always has a clear deadline.
+    let expectedCompletionAt: Date | undefined;
+    if (expectedCompletionAtRaw) {
+      const parsed = new Date(expectedCompletionAtRaw);
+      if (isNaN(parsed.getTime())) {
+        return NextResponse.json(
+          { message: "Invalid Expected Completion Time" },
+          { status: 400 },
+        );
+      }
+      expectedCompletionAt = parsed;
     }
 
     const files = formData.getAll("files") as File[];
@@ -57,8 +77,11 @@ export async function PUT(req: Request) {
     let softwareType = "N/A";
     if (task.company?.id) {
       try {
-        const companyInfo = await CompanyInformation.findById(String(task.company.id)).lean<CompanyDoc | null>();
-        softwareType = companyInfo?.softwareInformation?.[0]?.softwareType ?? "N/A";
+        const companyInfo = await CompanyInformation.findById(
+          String(task.company.id),
+        ).lean<CompanyDoc | null>();
+        softwareType =
+          companyInfo?.softwareInformation?.[0]?.softwareType ?? "N/A";
       } catch (err) {
         console.warn("Company lookup failed:", err);
       }
@@ -82,9 +105,18 @@ export async function PUT(req: Request) {
     ];
 
     const allowedExts = [
-      "pdf", "jpg", "jpeg", "png", "gif", 
-      "xlsx", "xls", "doc", "docx",
-      "txt", "csv", "json"
+      "pdf",
+      "jpg",
+      "jpeg",
+      "png",
+      "gif",
+      "xlsx",
+      "xls",
+      "doc",
+      "docx",
+      "txt",
+      "csv",
+      "json",
     ];
 
     for (let i = 0; i < files.length; i++) {
@@ -150,7 +182,15 @@ export async function PUT(req: Request) {
       softwareType,
     };
 
-    const updatedTask = await Task.findByIdAndUpdate(taskId, { $set: updateData }, { new: true, runValidators: true }).lean();
+    if (expectedCompletionAt) {
+      updateData.expectedCompletionAt = expectedCompletionAt;
+    }
+
+    const updatedTask = await Task.findByIdAndUpdate(
+      taskId,
+      { $set: updateData },
+      { new: true, runValidators: true },
+    ).lean();
 
     // Notification: alert the assignee (non-blocking)
     notifyTaskAssigned({
@@ -162,7 +202,13 @@ export async function PUT(req: Request) {
     return NextResponse.json(updatedTask);
   } catch (error: any) {
     console.error("Error assigning task:", error);
-    return NextResponse.json({ message: "Failed to assign task", error: error?.message ?? String(error) }, { status: 500 });
+    return NextResponse.json(
+      {
+        message: "Failed to assign task",
+        error: error?.message ?? String(error),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -196,10 +242,19 @@ export async function GET(req: Request) {
       return await getFileList(taskId, type);
     }
 
-    return NextResponse.json({ message: "taskId or fileId is required" }, { status: 400 });
+    return NextResponse.json(
+      { message: "taskId or fileId is required" },
+      { status: 400 },
+    );
   } catch (error: any) {
     console.error("Error handling file download:", error);
-    return NextResponse.json({ message: "Failed to handle file download", error: error?.message ?? String(error) }, { status: 500 });
+    return NextResponse.json(
+      {
+        message: "Failed to handle file download",
+        error: error?.message ?? String(error),
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -209,7 +264,7 @@ export async function GET(req: Request) {
 async function downloadSingleFile(fileId: string) {
   try {
     const gfs = await getGridFS();
-    
+
     if (!mongoose.Types.ObjectId.isValid(fileId)) {
       return NextResponse.json({ message: "Invalid file ID" }, { status: 400 });
     }
@@ -227,7 +282,10 @@ async function downloadSingleFile(fileId: string) {
         const files = await (gfs as any).find({ _id: objId }).toArray();
         fileDoc = files && files.length > 0 ? files[0] : null;
       } else {
-        const files = await db.collection("fs.files").find({ _id: objId }).toArray();
+        const files = await db
+          .collection("fs.files")
+          .find({ _id: objId })
+          .toArray();
         fileDoc = files && files.length > 0 ? files[0] : null;
       }
     } catch (err) {
@@ -243,7 +301,10 @@ async function downloadSingleFile(fileId: string) {
       : null;
 
     if (!downloadStream) {
-      return NextResponse.json({ message: "File stream not available" }, { status: 500 });
+      return NextResponse.json(
+        { message: "File stream not available" },
+        { status: 500 },
+      );
     }
 
     const chunks: Buffer[] = [];
@@ -265,7 +326,10 @@ async function downloadSingleFile(fileId: string) {
     });
   } catch (error: any) {
     console.error("Error downloading single file:", error);
-    return NextResponse.json({ message: "Failed to download file" }, { status: 500 });
+    return NextResponse.json(
+      { message: "Failed to download file" },
+      { status: 500 },
+    );
   }
 }
 
@@ -284,32 +348,37 @@ async function downloadAsZip(taskId: string, type: string | null = null) {
     }
 
     let allAttachments: string[] = [];
-    
+
     // Determine which attachments to include based on type
     switch (type) {
-      case 'assignment':
+      case "assignment":
         allAttachments = task.assignmentAttachment ?? [];
         break;
-      case 'rejection':
+      case "rejection":
         allAttachments = task.rejectionAttachment ?? []; // Add this case
         break;
-      case 'developer':
+      case "developer":
         allAttachments = task.developer_attachment ?? []; // Add this case
         break;
-      case 'task':
+      case "task":
       default:
         allAttachments = task.TasksAttachment ?? [];
         break;
     }
 
     // Filter to valid ObjectIds
-    allAttachments = allAttachments.filter(attachment => /^[0-9a-fA-F]{24}$/.test(attachment));
+    allAttachments = allAttachments.filter((attachment) =>
+      /^[0-9a-fA-F]{24}$/.test(attachment),
+    );
 
     if (allAttachments.length === 0) {
-      return NextResponse.json({ 
-        message: `No ${type || 'task'} attachments available`,
-        type: type || 'task'
-      }, { status: 404 });
+      return NextResponse.json(
+        {
+          message: `No ${type || "task"} attachments available`,
+          type: type || "task",
+        },
+        { status: 404 },
+      );
     }
 
     const gfs = await getGridFS();
@@ -319,15 +388,15 @@ async function downloadAsZip(taskId: string, type: string | null = null) {
     }
 
     // Create a pass-through stream for the ZIP
-    const { PassThrough } = await import('stream');
+    const { PassThrough } = await import("stream");
     const passThrough = new PassThrough();
-    
-    const archive = archiver('zip', {
-      zlib: { level: 9 }
+
+    const archive = archiver("zip", {
+      zlib: { level: 9 },
     });
 
-    archive.on('error', (err) => {
-      console.error('Archive error:', err);
+    archive.on("error", (err) => {
+      console.error("Archive error:", err);
       throw err;
     });
 
@@ -343,7 +412,10 @@ async function downloadAsZip(taskId: string, type: string | null = null) {
           const files = await (gfs as any).find({ _id: objId }).toArray();
           fileDoc = files && files.length > 0 ? files[0] : null;
         } else {
-          const files = await db.collection("fs.files").find({ _id: objId }).toArray();
+          const files = await db
+            .collection("fs.files")
+            .find({ _id: objId })
+            .toArray();
           fileDoc = files && files.length > 0 ? files[0] : null;
         }
 
@@ -363,7 +435,7 @@ async function downloadAsZip(taskId: string, type: string | null = null) {
 
           const fileBuffer = Buffer.concat(chunks);
           const fileName = fileDoc.filename || `file-${attachmentId}`;
-          
+
           archive.append(fileBuffer, { name: fileName });
         }
       } catch (fileError) {
@@ -382,7 +454,7 @@ async function downloadAsZip(taskId: string, type: string | null = null) {
     const zipBuffer = Buffer.concat(chunks);
 
     // Set the filename based on type
-    const filename = `${type || 'task'}-attachments-${taskId}.zip`;
+    const filename = `${type || "task"}-attachments-${taskId}.zip`;
 
     return new Response(zipBuffer, {
       headers: {
@@ -393,7 +465,10 @@ async function downloadAsZip(taskId: string, type: string | null = null) {
     });
   } catch (error: any) {
     console.error("Error creating ZIP archive:", error);
-    return NextResponse.json({ message: "Failed to create ZIP archive" }, { status: 500 });
+    return NextResponse.json(
+      { message: "Failed to create ZIP archive" },
+      { status: 500 },
+    );
   }
 }
 
@@ -414,26 +489,26 @@ async function getFileList(taskId: string, type: string | null = null) {
     // Get the appropriate attachment array based on type
     let attachmentArray: string[] = [];
     switch (type) {
-      case 'assignment':
+      case "assignment":
         attachmentArray = task.assignmentAttachment ?? [];
         break;
-      case 'rejection':
+      case "rejection":
         attachmentArray = task.rejectionAttachment ?? [];
         break;
-      case 'developer':
+      case "developer":
         attachmentArray = task.developer_attachment ?? [];
         break;
-      case 'task':
+      case "task":
       default:
         attachmentArray = task.TasksAttachment ?? [];
         break;
     }
 
     if (attachmentArray.length === 0) {
-      return NextResponse.json({ 
-        message: `No ${type || 'task'} attachments available`,
+      return NextResponse.json({
+        message: `No ${type || "task"} attachments available`,
         files: [],
-        type: type || 'task'
+        type: type || "task",
       });
     }
 
@@ -442,10 +517,10 @@ async function getFileList(taskId: string, type: string | null = null) {
       return {
         id: attachment,
         name: `file-${index + 1}`,
-        downloadUrl: isValidObjectId 
+        downloadUrl: isValidObjectId
           ? `/api/tasks/assign?taskId=${taskId}&fileId=${attachment}`
           : attachment,
-        isValidObjectId
+        isValidObjectId,
       };
     });
 
@@ -453,10 +528,13 @@ async function getFileList(taskId: string, type: string | null = null) {
       message: "Files retrieved successfully",
       taskCode: task.code,
       files: files,
-      type: type || 'task'
+      type: type || "task",
     });
   } catch (error: any) {
     console.error("Error getting file list:", error);
-    return NextResponse.json({ message: "Failed to get file list" }, { status: 500 });
+    return NextResponse.json(
+      { message: "Failed to get file list" },
+      { status: 500 },
+    );
   }
 }

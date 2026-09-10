@@ -1,3 +1,5 @@
+
+
 import { NextResponse } from "next/server";
 import dbConnect from "@/lib/db";
 import OnlineComplaint from "@/models/OnlineComplaint";
@@ -6,6 +8,7 @@ import { validateFileType, validateFileSize } from "@/lib/downloadUtils";
 import { verifyToken } from "@/lib/jwt";
 import { sendComplaintEmail } from "@/lib/email-service";
 import { isValidActiveSoftwareType } from "@/lib/softwareTypes";
+import { isValidActiveComplaintType } from "@/lib/complaintTypes";
 import { notifyComplaintCreated } from "@/lib/notification-events";
 import { pushComplaintHistory } from "@/lib/complaint-history";
 
@@ -44,6 +47,7 @@ export async function POST(request: Request) {
     // Required fields
     const rawCompany = formData.get("company") as string;
     const softwareType = formData.get("softwareType") as string;
+    const complaintType = formData.get("complaintType") as string;
     const contactPerson = formData.get("contactPerson") as string;
     const contactPhone = formData.get("contactPhone") as string;
     const complaintRemarks = formData.get("complaintRemarks") as string;
@@ -55,6 +59,7 @@ export async function POST(request: Request) {
     if (
       !rawCompany ||
       !softwareType ||
+      !complaintType ||
       !contactPerson ||
       !contactPhone ||
       !complaintRemarks ||
@@ -62,7 +67,7 @@ export async function POST(request: Request) {
     ) {
       return NextResponse.json(
         {
-          error: "All fields are required",
+          error: "All fields are required, including Complaint Type",
         },
         { status: 400 },
       );
@@ -90,6 +95,15 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: `Invalid software type: "${softwareType}" is not an active software type.`,
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!(await isValidActiveComplaintType(complaintType))) {
+      return NextResponse.json(
+        {
+          error: `Invalid complaint type: "${complaintType}" is not an active complaint type.`,
         },
         { status: 400 },
       );
@@ -191,6 +205,7 @@ export async function POST(request: Request) {
       },
 
       softwareType,
+      complaintType,
       contactPerson,
       contactPhone: normalizedContactPhone,
       complaintRemarks,
@@ -318,6 +333,9 @@ export async function GET(req: Request) {
 
       assignedTo: c.assignedTo || null,
       assignedDate: c.assignedDate ? c.assignedDate.toISOString() : null,
+      expectedCompletionAt: c.expectedCompletionAt
+        ? c.expectedCompletionAt.toISOString()
+        : null,
       resolvedDate: c.resolvedDate ? c.resolvedDate.toISOString() : null, // Add this line
       resolutionRemarks: c.resolutionRemarks || "", // Add this line
       developerStatus: c.developerStatus || "not-started", // Add this line
